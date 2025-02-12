@@ -277,9 +277,6 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         claimableOutputTokens[positionId] += outputAmount;
     }
 
-
-    
-
 }
 
 
