@@ -112,6 +112,31 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         return uint256(keccak256(abi.encode(key.toId(), tick, zeroForOne)));
     }
 
+    function placeOrder(
+        PoolKey calldata key,
+        int24 tickToSellAt,
+        bool zeroForOne,
+        uint256 inputAmount
+    ) external returns (int24) {
+        // Get lower actually usable tick given `tickToSellAt`
+        int24 tick = getLowerUsableTick(tickToSellAt, key.tickSpacing);
+
+        // Create a pending order
+        pendingOrders[key.toId()][tick][zeroForOne] += inputAmount;
+
+        // Mint claim tokens to user equal to their `inputAmount`
+        uint256 positionId = getPositionId(key, tick, zeroForOne);
+        claimTokenSupply[positionId] += inputAmount;
+        _mint(msg.sender, positionId, inputAmount, "");
+
+        // Depending on direction of swap, we select the proper input token
+        // and request a transfer of those tokens to the hook contract
+        address sellToken = zeroForOne ? Currency.unwrap(key.currency0) : Currency.unwrap(key.currency1);
+        IERC20(sellToken).transferFrom(msg.sender, address(this), inputAmount);
+
+        // Return the tick at which the order was actually placed
+        return tick;
+    }
 
 
 
