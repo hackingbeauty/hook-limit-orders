@@ -34,6 +34,12 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
     error NothingToClaim();
     error NotEnoughtToClaim();
 
+    mapping(PoolId poolId => 
+        mapping(int24 tickToSellAt => 
+            mapping(bool zeroForOne => uint256 inputAmount))) public pendingOrders;
+
+    mapping(uint256 positionId => uint256 claimsSupply) public claimTokenSupply;
+
     // Constructor
     constructor(
         IPoolManager _manager,
@@ -79,7 +85,34 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         return (this.afterSwap.selector, 0);
     }
 
-    
+    function getLowerUsableTick(
+        int24 tick,
+        int24 tickSpacing
+    ) private pure returns (int24) {
+        // E.g. tickSpacing = 60, tick = -100
+        // closest usable tick rounded-down will be -120
+
+        // intervals = -100/60 = -1 (integer division)
+        int24 intervals = tick/tickSpacing;
+
+        // since tick < 0, we round `intervals` down to -2
+        // if tick > 0, `intervals` is fine as it is
+        if (tick < 0 && tick % tickSpacing !=0) intervals--; //round toward negative infinity
+
+        // actual usable tick, then, is intervals * tickSpacing
+        // i.e. -2 * 60 = -120
+        return intervals * tickSpacing;
+    }
+
+    function getPositionId(
+        PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne
+    ) public pure returns (uint256) {
+        return uint256(keccak256(abi.encode(key.toId(), tick, zeroForOne)));
+    }
+
+
 
 
 }
