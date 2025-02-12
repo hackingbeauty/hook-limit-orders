@@ -39,6 +39,7 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
             mapping(bool zeroForOne => uint256 inputAmount))) public pendingOrders;
 
     mapping(uint256 positionId => uint256 claimsSupply) public claimTokenSupply;
+    mapping(uint256 positionId => uint256 outputClaimable) public claimableOutputTokens;
 
     // Constructor
     constructor(
@@ -138,7 +139,70 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         return tick;
     }
 
+    function cancelOrder(
+        PoolKey calldata key,
+        int24 tickToSellAt,
+        bool zeroForOne,
+        uint256 amountToCancel
+    ) external {
+        // Get lower actually usable tick for their order
+        int24 tick = getLowerUsableTick(tickToSellAt, key.tickSpacing);
+        uint256 positionId = getPositionId(key, tick, zeroForOne);
 
+        // Check how many claim tokens they have for this position
+        uint256 positionTokens = balanceOf(msg.sender, positionId);
+        if (positionTokens < amountToCancel) revert NotEnoughToClaim();
+
+        // Remove their `amountToCancel` worth of position from pending orders
+        pendingOrders[key.toId()][tick][zeroForOne] -= amountToCancel;
+
+        // Reduce claim token total supply and burn their share
+        claimTokenSupply[positionId] -= amountToCancel;
+        _burn(msg.sender, positionId, amountToCancel);
+
+        // Send them their input token
+        Currency token = zeroForOne ? key.currency0 : key.currency1;
+        token.transfer(msg.sender, amountToCancel);
+    }
+
+    function redeem(
+        PoolKey calldata key,
+        int24 tickToSellAt,
+        bool zeroForOne,
+        uint256 inputAmountToClaimFor
+    ) external {
+        // Get lower actually usable tick for their order
+        int24 tick = getLowerUsableTick(tickToSellAt, key.tickSpacing);
+        uint256 positionId = getPositionId(key, tick, zeroForOne);
+
+        // If no output tokens can be claimed yet i.e. order hasn't been filled
+        // throw error
+        if (claimableOutputTokens[positionId] == 0) revert NothingToClaim();
+
+        // They must have claim tokens >= inputAmountToClaimFor
+        uint256 positionTokens = balanceOf(msg.sender, positionId);
+        if (positionTokens < inputAmountToClaimFor) revert NotEnoughtToClaim();
+
+        uint256 totalClaimableForPosition = claimableOutputTokens[positionId];
+        uint256 totalInputAmountForPosition = claimTokenSupply[positionId];
+
+        // outputAmount = (inputAmountToClaimFor * totalClaimableForPosition) / (totalInputAmountForPosition)
+        uint256 outputAmount = inputAmountToClaimFor.mulDivDown(
+            totalClaimableForPosition,
+            totalInputAmountForPosition
+        );
+
+        // Reduce claimable output tokens amount
+        // Reduce claim token total supply for position
+        // Burn claim tokens
+        claimableOutputTokens[positionId] -= outputAmount;
+        claimTokenSupply[positionId] -= inputAmountToClaimFor;
+        _burn(msg.sender, positionId, inputAmountToClaimFor);
+
+        // Transfer output tokens
+        Currency token = zeroForOne ? key.currency1 : key.currency0;
+        token.transfer(msg.sender, outputAmount);
+    }
 
 }
 
